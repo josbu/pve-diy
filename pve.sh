@@ -85,7 +85,10 @@ aptsources() {
 		TIME r "您的版本不支持！"
 		exit 1
 	fi
-	cp -rf /etc/apt/sources.list /etc/apt/backup/sources.list.bak
+
+	[[ -e /etc/apt/sources.list ]] && cp -rf /etc/apt/sources.list /etc/apt/backup/sources.list.bak
+	[[ -e /etc/apt/sources.list.d/debian.sources ]] && mv /etc/apt/sources.list.d/debian.sources /etc/apt/backup/debian.sources.bak
+
 	echo " 请选择您需要的apt国内源"
 	echo " 1. 清华大学镜像站"
 	echo " 2. 中科大镜像站"
@@ -121,7 +124,8 @@ aptsources() {
 }
 # CT模板国内源
 ctsources() {
-	cp -rf /usr/share/perl5/PVE/APLInfo.pm /usr/share/perl5/PVE/APLInfo.pm.bak
+    [[ -e /usr/share/perl5/PVE/APLInfo.pm ]] && cp -rf /usr/share/perl5/PVE/APLInfo.pm /etc/apt/backup/APLInfo.pm.bak
+    [[ -e /var/lib/pve-manager/apl-info/download.proxmox.com ]] && cp -rf /var/lib/pve-manager/apl-info/download.proxmox.com /etc/apt/backup/download.proxmox.com.bak
 	echo " 请选择您需要的CT模板国内源"
 	echo " 1. 清华大学镜像站"
 	echo " 2. 中科大镜像站"
@@ -133,11 +137,13 @@ ctsources() {
 	1)
 	sed -i 's|http://download.proxmox.com|https://mirrors.tuna.tsinghua.edu.cn/proxmox|g' /usr/share/perl5/PVE/APLInfo.pm
 	sed -i 's|http://mirrors.ustc.edu.cn/proxmox|https://mirrors.tuna.tsinghua.edu.cn/proxmox|g' /usr/share/perl5/PVE/APLInfo.pm
+    pveam update
 	break
 	;;
 	2)
 	sed -i 's|http://download.proxmox.com|http://mirrors.ustc.edu.cn/proxmox|g' /usr/share/perl5/PVE/APLInfo.pm
 	sed -i 's|https://mirrors.tuna.tsinghua.edu.cn/proxmox|http://mirrors.ustc.edu.cn/proxmox|g' /usr/share/perl5/PVE/APLInfo.pm
+    pveam update
 	break
 	;;
 	*)
@@ -149,12 +155,12 @@ ctsources() {
 }
 # 更换使用帮助源
 pvehelp(){
-	if [ ! -e /etc/apt/sources.list.d ]; then
-		mkdir -p /etc/apt/sources.list.d;
-	fi;
-	if [[ -f /etc/apt/sources.list.d/pve-no-subscription.list ]];then
-	cp -rf /etc/apt/sources.list.d/pve-no-subscription.list /etc/apt/backup/pve-no-subscription.list.bak
-	fi
+	[[ ! -d /etc/apt/sources.list.d ]] && mkdir -p /etc/apt/sources.list.d
+	[[ -e /etc/apt/sources.list.d/ceph.sources ]] && mv /etc/apt/sources.list.d/ceph.sources /etc/apt/backup/ceph.sources.bak
+	[[ -e /etc/apt/sources.list.d/ceph.list ]] && mv /etc/apt/sources.list.d/ceph.list /etc/apt/backup/ceph.list.bak
+
+    [[ -e /etc/apt/sources.list.d/pve-no-subscription.list ]] && cp -rf /etc/apt/sources.list.d/pve-no-subscription.list /etc/apt/backup/pve-no-subscription.list.bak
+
 	cat > /etc/apt/sources.list.d/pve-no-subscription.list <<-EOF
 deb https://mirrors.tuna.tsinghua.edu.cn/proxmox/debian ${sver} pve-no-subscription
 EOF
@@ -162,12 +168,18 @@ EOF
 }
 # 关闭企业源
 pveenterprise(){
-	if [[ -f /etc/apt/sources.list.d/pve-enterprise.list ]];then
-		cp -rf /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/backup/pve-enterprise.list.bak
-		rm -rf /etc/apt/sources.list.d/pve-enterprise.list
-		TIME g "企业源已移除完成!"
+	if [[ -e /etc/apt/sources.list.d/pve-enterprise.sources ]];then
+		mv /etc/apt/sources.list.d/pve-enterprise.sources /etc/apt/backup/pve-enterprise.sources.bak
+		TIME g "企业源pve-enterprise.sources已移除完成!"
 	else
-		TIME g "pve-enterprise.list不存在，忽略!"
+		TIME g "企业源pve-enterprise.sources不存在，忽略!"
+	fi
+
+	if [[ -e /etc/apt/sources.list.d/pve-enterprise.list ]];then
+		mv /etc/apt/sources.list.d/pve-enterprise.list /etc/apt/backup/pve-enterprise.list.bak
+		TIME g "企业源pve-enterprise.list已移除完成!"
+	else
+		TIME g "企业源pve-enterprise.list不存在，忽略!"
 	fi
 }
 # 移除无效订阅
@@ -180,12 +192,11 @@ novalidsub(){
 	TIME g "已移除订阅提示!"
 }
 pvegpg(){
-	cp -rf /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg /etc/apt/backup/proxmox-release-${sver}.gpg.bak
-	rm -rf /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg
+	[[ -e /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg ]] && mv /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg /etc/apt/backup/proxmox-release-${sver}.gpg.bak
 	wget -q --timeout=5 --tries=1 --show-progres http://mirrors.tuna.tsinghua.edu.cn/proxmox/debian/proxmox-release-${sver}.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg
 	if [[ $? -ne 0 ]];then
 		TIME r "尝试重新下载..."
-		wget -q --timeout=5 --tries=1 --show-progres https://enterprise.proxmox.com/debian/proxmox-release-${sver}.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg
+		wget -q --timeout=5 --tries=1 --show-progres https://raw.githubusercontent.com/xiangfeidexiaohuo/pve-diy/master/gpg/proxmox-release-${sver}.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-${sver}.gpg
 			if [[ $? -ne 0 ]];then
 				TIME r "下载秘钥失败，请检查网络再尝试!"
 				sleep 2
@@ -225,10 +236,12 @@ pve_optimization(){
 	systemctl daemon-reload && systemctl restart pveproxy.service && TIME g "服务重启完成!"
 	sleep 3
 	echo
-	TIME y "※※※※※ 更新源、安装常用软件和升级... ※※※※※"
+	TIME y "※※※※※ 更新源、更新常用软件和升级... ※※※※※"
 	# apt-get update && apt-get install -y net-tools curl git
 	# apt-get dist-upgrade -y
-	TIME y "如需对PVE进行升级，请使用apt-get update -y && apt-get upgrade -y && apt-get dist-upgrade -y"
+	TIME g "更新源命令：apt-get update -y"
+	TIME g "更新软件包命令：apt-get upgrade -y"
+	TIME g "更新PVE命令：apt-get dist-upgrade -y"
 	echo
 	TIME g "修改完毕！"
 }
@@ -237,7 +250,7 @@ pve_optimization(){
 
 
 #---------PVE8/9添加ceph-squid源-----------
-pve_ceph(){
+pve9_ceph(){
 	sver=`cat /etc/debian_version |awk -F"." '{print $1}'`
 	case "$sver" in
  	13 )
@@ -256,18 +269,82 @@ pve_ceph(){
 	fi
 
 	TIME g "ceph-squid目前仅支持PVE8和9！"
-	if [ ! -e /etc/apt/sources.list.d ]; then
-		mkdir -p /etc/apt/sources.list.d;
-	fi;
-	if [[ -f /etc/apt/sources.list.d/ceph.list ]];then
-	cp -rf /etc/apt/sources.list.d/ceph.list /etc/apt/backup/ceph.list.bak
-	fi
+	[[ ! -d /etc/apt/backup ]] && mkdir -p /etc/apt/backup
+	[[ ! -d /etc/apt/sources.list.d ]] && mkdir -p /etc/apt/sources.list.d
+
+	[[ -e /etc/apt/sources.list.d/ceph.sources ]] && mv /etc/apt/sources.list.d/ceph.sources /etc/apt/backup/ceph.sources.bak
+    [[ -e /etc/apt/sources.list.d/ceph.list ]] && mv /etc/apt/sources.list.d/ceph.list /etc/apt/backup/ceph.list.bak
+
+    [[ -e /usr/share/perl5/PVE/CLI/pveceph.pm ]] && cp -rf /usr/share/perl5/PVE/CLI/pveceph.pm /etc/apt/backup/pveceph.pm.bak
+	sed -i 's|http://download.proxmox.com|https://mirrors.tuna.tsinghua.edu.cn/proxmox|g' /usr/share/perl5/PVE/CLI/pveceph.pm
+
 	cat > /etc/apt/sources.list.d/ceph.list <<-EOF
 deb https://mirrors.tuna.tsinghua.edu.cn/proxmox/debian/ceph-squid ${sver} no-subscription
 EOF
 	TIME g "添加ceph-squid源完成!"
 }
 #---------PVE8/9添加ceph-squid源-----------
+
+
+#---------PVE7/8添加ceph-quincy源-----------
+pve8_ceph(){
+	sver=`cat /etc/debian_version |awk -F"." '{print $1}'`
+	case "$sver" in
+ 	12 )
+  		sver="bookworm"
+ 	;;
+ 	11 )
+  		sver="bullseye"
+ 	;;
+	* )
+		sver=""
+	;;
+	esac
+	if [ ! $sver ];then
+		TIME r "版本不支持！"
+		exit 1
+	fi
+
+	TIME g "ceph-quincy目前仅支持PVE7和8！"
+	[[ ! -d /etc/apt/backup ]] && mkdir -p /etc/apt/backup
+	[[ ! -d /etc/apt/sources.list.d ]] && mkdir -p /etc/apt/sources.list.d
+
+	[[ -e /etc/apt/sources.list.d/ceph.sources ]] && mv /etc/apt/sources.list.d/ceph.sources /etc/apt/backup/ceph.sources.bak
+    [[ -e /etc/apt/sources.list.d/ceph.list ]] && mv /etc/apt/sources.list.d/ceph.list /etc/apt/backup/ceph.list.bak
+
+    [[ -e /usr/share/perl5/PVE/CLI/pveceph.pm ]] && cp -rf /usr/share/perl5/PVE/CLI/pveceph.pm /etc/apt/backup/pveceph.pm.bak
+	sed -i 's|http://download.proxmox.com|https://mirrors.tuna.tsinghua.edu.cn/proxmox|g' /usr/share/perl5/PVE/CLI/pveceph.pm
+
+	cat > /etc/apt/sources.list.d/ceph.list <<-EOF
+deb https://mirrors.tuna.tsinghua.edu.cn/proxmox/debian/ceph-quincy ${sver} main
+EOF
+	TIME g "添加ceph-quincy源完成!"
+}
+#---------PVE7/8添加ceph-quincy源-----------
+
+
+#---------PVE一键卸载ceph-----------
+remove_ceph(){
+TIME g "会卸载ceph，并删除所有ceph相关文件！"
+
+systemctl stop ceph-mon.target && systemctl stop ceph-mgr.target && systemctl stop ceph-mds.target && systemctl stop ceph-osd.target
+rm -rf /etc/systemd/system/ceph*
+
+killall -9 ceph-mon ceph-mgr ceph-mds ceph-osd
+rm -rf /var/lib/ceph/mon/* && rm -rf /var/lib/ceph/mgr/* && rm -rf /var/lib/ceph/mds/* && rm -rf /var/lib/ceph/osd/*
+
+pveceph purge
+
+apt purge -y ceph-mon ceph-osd ceph-mgr ceph-mds
+apt purge -y ceph-base ceph-mgr-modules-core
+
+rm -rf /etc/ceph && rm -rf /etc/pve/ceph.conf  && rm -rf /etc/pve/priv/ceph.* && rm -rf /var/log/ceph && rm -rf /etc/pve/ceph && rm -rf /var/lib/ceph
+
+[[ -e /etc/apt/sources.list.d/ceph.sources ]] && mv /etc/apt/sources.list.d/ceph.sources /etc/apt/backup/ceph.sources.bak
+
+TIME g "已成功卸载ceph."
+}
+#---------PVE一键卸载ceph-----------
 
 
 #--------------开启硬件直通----------------
@@ -517,6 +594,8 @@ echo pve版本$pvever
 # 输入需要安装的软件包
 packages=(lm-sensors nvme-cli sysstat linux-cpupower)
 
+# 先刷新下源
+apt-get update
 # 查询软件包，判断是否安装
 for package in "${packages[@]}"; do
     if ! dpkg -s "$package" &> /dev/null; then
@@ -709,7 +788,7 @@ cat > $tmpf << 'EOF'
 	    itemId: 'nvme0-status',
 	    colspan: 2,
 	    printBar: false,
-	    title: gettext('NVME 硬盘'),
+	    title: gettext('NVME硬盘'),
 	    textField: 'nvme0_status',
 	    renderer:function(value){
 	        if (value.length > 0) {
@@ -944,43 +1023,64 @@ cat > $tmpf << 'EOF'
 	},
 	// 检测不到相关参数的可以注释掉---需要的注释本行即可  */
 
-          // SATA硬盘温度
-          {
-          itemId: 'hdd-temperatures',
-          colspan: 2,
-          printBar: false,
-          title: gettext('SATA硬盘'),
-          textField: 'hdd_temperatures',
-          renderer:function(value){
-          if (value.length > 0) {
-          let devices = value.matchAll(/(\s*Model.*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
-          for (const device of devices) {
-          if(device[1].indexOf("Family") !== -1){
+  // SATA硬盘温度
+  {
+  itemId: 'hdd-temperatures',
+  colspan: 2,
+  printBar: false,
+  title: gettext('SATA硬盘'),
+  textField: 'hdd_temperatures',
+  renderer: function(value) {
+    if (value.length > 0) {
+      let devices = value.matchAll(/(\s*(Model|Device Model|Vendor).*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
+      let output = '';
+      
+      for (const device of devices) {
+        let devicemodel = '';
+        
+        if (device[1].indexOf("Family") !== -1) {
           devicemodel = device[1].replace(/.*Model Family:\s*([\s\S]*?)\n^Device Model:\s*([\s\S]*?)\n/m, '$1 - $2');
+        } else if (device[1].match(/Vendor/)) {
+          devicemodel = device[1].replace(/.*Vendor:\s*([\s\S]*?)\n^.*Model:\s*([\s\S]*?)\n/m, '$1 $2');
+        } else {
+          devicemodel = device[1].replace(/.*(Model|Device Model):\s*([\s\S]*?)\n/m, '$2');
+        }
+        
+        let capacity = device[3] ? device[3].replace(/ |,/gm, '') : "未知容量";
+        let powerOnHours = device[4] || "未知";
+        
+        if (value.indexOf("Min/Max") !== -1) {
+          let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
+          for (const devicetemp of devicetemps || []) {
+            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
+          }
+        } else if (value.indexOf("Temperature") !== -1 || value.match(/Airflow_Temperature/)) {
+          let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)/gm);
+          for (const devicetemp of devicetemps || []) {
+            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
+          }
+        } else {
+          if (value.match(/\/dev\/sd[a-z]/) && !output) {
+            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 设备存在但未报告温度信息\n`;
           } else {
-          devicemodel = device[1].replace(/.*Model:\s*([\s\S]*?)\n/m, '$1');
+            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 未检测到温度传感器\n`;
           }
-          device[2] = device[2].replace(/ |,/gm, '');
-          if(value.indexOf("Min/Max") !== -1){
-          let devicetemps = device[5].matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
-          for (const devicetemp of devicetemps) {
-          value = `${devicemodel} | 容量: ${device[2]} | 已通电: ${device[3]}小时 | 温度: ${devicetemp[1]}°C\n`;
-          }
-          } else if (value.indexOf("Temperature") !== -1){
-          let devicetemps = device[5].matchAll(/19[0,4][\s\S]*?\-\s*(\d+)/gm);
-          for (const devicetemp of devicetemps) {
-          value = `${devicemodel} | 容量: ${device[2]} | 已通电: ${device[3]}小时 | 温度: ${devicetemp[1]}°C\n`;
-          }
-          } else {
-          value = `${devicemodel} | 容量: ${device[2]} | 已通电: ${device[3]}小时 | 提示: 未检测到温度传感器\n`;
-          }
-          }
-          return value.replace(/\n/g, '<br>');
-          } else { 
-          return `提示: 未安装硬盘或已直通硬盘控制器`;
-          }
-          }
-          },
+        }
+      }
+      
+      if (!output && value.length > 0) {
+        let fallbackDevices = value.matchAll(/(\/dev\/sd[a-z]).*?Model:([\s\S]*?)\n/gm);
+        for (const fallbackDevice of fallbackDevices || []) {
+          output += `${fallbackDevice[2].trim()} | 提示: 设备存在但无法获取完整信息\n`;
+        }
+      }
+      
+      return output ? output.replace(/\n/g, '<br>') : '提示: 检测到硬盘但无法识别详细信息';
+    } else {
+      return '提示: 未安装硬盘或已直通硬盘控制器';
+    }
+  }
+  },
 EOF
 
 echo 找到关键字pveversion的行号
@@ -1064,6 +1164,8 @@ menu(){
     4. 添加CPU、主板、硬盘温度显示
     5. 删除CPU、主板、硬盘温度显示
     6. PVE8/9添加ceph-squid源
+    7. PVE7/8添加ceph-quincy源
+    8. 一键卸载ceph
 ├──────────────────────────────────────────┤
     0. 退出
 └──────────────────────────────────────────┘
@@ -1104,7 +1206,19 @@ EOF
 		menu
 	;;
 	6)
-		pve_ceph
+		pve9_ceph
+		echo
+		pause
+		menu
+	;;
+	7)
+		pve8_ceph
+		echo
+		pause
+		menu
+	;;
+	8)
+		remove_ceph
 		echo
 		pause
 		menu
