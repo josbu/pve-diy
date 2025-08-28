@@ -591,11 +591,14 @@ echo pve版本$pvever
 # 判断是否已经执行过修改
 [ ! -e $nodes.$pvever.bak ] || { echo 已经执行过修改，请勿重复执行; exit 1;}
 
+# 先刷新下源
+apt-get update
+sleep 5
+echo "开始修改~"
+
 # 输入需要安装的软件包
 packages=(lm-sensors nvme-cli sysstat linux-cpupower)
 
-# 先刷新下源
-apt-get update
 # 查询软件包，判断是否安装
 for package in "${packages[@]}"; do
     if ! dpkg -s "$package" &> /dev/null; then
@@ -1032,12 +1035,41 @@ cat > $tmpf << 'EOF'
   textField: 'hdd_temperatures',
   renderer: function(value) {
     if (value.length > 0) {
+      try {
+        const jsonData = JSON.parse(value);
+        if (jsonData.standy === true) {
+          return '休眠中';
+        }
+        
+        let output = '';
+        if (jsonData.model_name) {
+
+          output = jsonData.model_name;
+          
+          if (jsonData.temperature?.current !== undefined) {
+            output += ` | 温度: ${jsonData.temperature.current}°C`;
+          }
+          
+          if (jsonData.power_on_time?.hours !== undefined) {
+            output += ` | 通电: ${jsonData.power_on_time.hours}小时`;
+            if (jsonData.power_cycle_count) {
+              output += `, 次数: ${jsonData.power_cycle_count}`;
+            }
+          }
+          
+          if (jsonData.smart_status?.passed !== undefined) {
+            output += ' | SMART: ' + (jsonData.smart_status.passed ? '正常' : '警告!');
+          }
+          
+          return output;
+        }
+      } catch (e) {
+      }
+
       let devices = value.matchAll(/(\s*(Model|Device Model|Vendor).*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
       let output = '';
-      
       for (const device of devices) {
         let devicemodel = '';
-        
         if (device[1].indexOf("Family") !== -1) {
           devicemodel = device[1].replace(/.*Model Family:\s*([\s\S]*?)\n^Device Model:\s*([\s\S]*?)\n/m, '$1 - $2');
         } else if (device[1].match(/Vendor/)) {
@@ -1045,10 +1077,8 @@ cat > $tmpf << 'EOF'
         } else {
           devicemodel = device[1].replace(/.*(Model|Device Model):\s*([\s\S]*?)\n/m, '$2');
         }
-        
         let capacity = device[3] ? device[3].replace(/ |,/gm, '') : "未知容量";
         let powerOnHours = device[4] || "未知";
-        
         if (value.indexOf("Min/Max") !== -1) {
           let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
           for (const devicetemp of devicetemps || []) {
@@ -1067,14 +1097,12 @@ cat > $tmpf << 'EOF'
           }
         }
       }
-      
       if (!output && value.length > 0) {
         let fallbackDevices = value.matchAll(/(\/dev\/sd[a-z]).*?Model:([\s\S]*?)\n/gm);
         for (const fallbackDevice of fallbackDevices || []) {
           output += `${fallbackDevice[2].trim()} | 提示: 设备存在但无法获取完整信息\n`;
         }
       }
-      
       return output ? output.replace(/\n/g, '<br>') : '提示: 检测到硬盘但无法识别详细信息';
     } else {
       return '提示: 未安装硬盘或已直通硬盘控制器';
