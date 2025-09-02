@@ -756,7 +756,7 @@ cat > $tmpf << 'EOF'
 			  
 			  for (const match of freqMatches) {
 			      const coreNum = frequencies.length + 1;
-			      frequencies.push(`核心${coreNum}: ${parseFloat(match[1]).toFixed(2)} MHz`);
+			      frequencies.push(`核心${coreNum}: ${parseInt(match[1])} MHz`);
 			  }
         
 			  return frequencies.length > 0 
