@@ -729,18 +729,20 @@ cat > $tmpf << 'EOF'
           printBar: false,
           title: gettext('CPU温度'),
           textField: 'thermalstate',
-          renderer:function(value){
-              // const p0 = value.match(/Package id 0.*?\+([\d\.]+)Â/)[1];  // CPU包温度
-              const c0 = value.match(/Core 0.*?\+([\d\.]+)?/)[1];  // CPU核心1温度
-              const c1 = value.match(/Core 1.*?\+([\d\.]+)?/)[1];  // CPU核心2温度
-              const c2 = value.match(/Core 2.*?\+([\d\.]+)?/)[1];  // CPU核心3温度
-              const c3 = value.match(/Core 3.*?\+([\d\.]+)?/)[1];  // CPU核心4温度
-              const b0 = value.match(/temp1.*?\+([\d\.]+)?/)[1];  // 主板温度
-              return ` 核心1: ${c0} ℃ | 核心2: ${c1} ℃ | 核心3: ${c2} ℃ | 核心4: ${c3} ℃ || 主板: ${b0} ℃ `
-            }
-    },
-
-
+          renderer: function(value) {
+			  const coreTemps = [];
+			  let coreMatch;
+			  const coreRegex = /Core (\d+).*?\+([\d\.]+)/g;
+			  while ((coreMatch = coreRegex.exec(value)) !== null) {
+ 	                      coreTemps.push(`核心${parseInt(coreMatch[1])+1}: ${coreMatch[2]} ℃`);
+			  }
+        
+			  const boardTempMatch = value.match(/temp1.*?\+([\d\.]+)/);
+			  const boardTemp = boardTempMatch ? ` || 主板: ${boardTempMatch[1]} ℃` : '';
+        
+			  return coreTemps.join(' | ') + boardTemp;
+          }
+	},
 
 	{
           itemId: 'HEXIN',
@@ -748,16 +750,20 @@ cat > $tmpf << 'EOF'
           printBar: false,
           title: gettext('核心频率'),
           textField: 'cpusensors',
-          renderer:function(value){
-			  const e0 = value.split('\n')[0].split(' ')[2];
-			  const e1 = value.split('\n')[1].split(' ')[2];
-			  const e2 = value.split('\n')[2].split(' ')[2];
-			  const e3 = value.split('\n')[3].split(' ')[2];
-			  return `核心1: ${e0} MHz | 核心2: ${e1} MHz | 核心3: ${e2} MHz | 核心4: ${e3} MHz `
-            }
+          renderer: function(value) {
+			  const freqMatches = value.matchAll(/^cpu MHz\s*:\s*([\d\.]+)/gm);
+			  const frequencies = [];
+			  
+			  for (const match of freqMatches) {
+			      const coreNum = frequencies.length + 1;
+			      frequencies.push(`核心${coreNum}: ${parseFloat(match[1]).toFixed(2)} MHz`);
+			  }
+        
+			  return frequencies.length > 0 
+			      ? frequencies.join(' | ')
+			      : '无法获取CPU频率信息';
+           }
 	},
-
-
 	
 	/* 检测不到相关参数的可以注释掉---需要的注释本行即可
 	// 风扇转速
@@ -1026,89 +1032,89 @@ cat > $tmpf << 'EOF'
 	},
 	// 检测不到相关参数的可以注释掉---需要的注释本行即可  */
 
-  // SATA硬盘温度
-  {
-  itemId: 'hdd-temperatures',
-  colspan: 2,
-  printBar: false,
-  title: gettext('SATA硬盘'),
-  textField: 'hdd_temperatures',
-  renderer: function(value) {
-    if (value.length > 0) {
-      try {
-        const jsonData = JSON.parse(value);
-        if (jsonData.standy === true) {
-          return '休眠中';
-        }
-        
-        let output = '';
-        if (jsonData.model_name) {
+	// SATA硬盘温度
+	{
+	    itemId: 'hdd-temperatures',
+	    colspan: 2,
+	    printBar: false,
+	    title: gettext('SATA硬盘'),
+	    textField: 'hdd_temperatures',
+	    renderer: function(value) {
+	        if (value.length > 0) {
+	           try {
+	           const jsonData = JSON.parse(value);
+	        if (jsonData.standy === true) {
+	           return '休眠中';
+	           }
+	      
+	        let output = '';
+	        if (jsonData.model_name) {
 
-          output = jsonData.model_name;
+	        output = jsonData.model_name;
           
-          if (jsonData.temperature?.current !== undefined) {
-            output += ` | 温度: ${jsonData.temperature.current}°C`;
-          }
+                if (jsonData.temperature?.current !== undefined) {
+                   output += ` | 温度: ${jsonData.temperature.current}°C`;
+                }
           
-          if (jsonData.power_on_time?.hours !== undefined) {
-            output += ` | 通电: ${jsonData.power_on_time.hours}小时`;
-            if (jsonData.power_cycle_count) {
-              output += `, 次数: ${jsonData.power_cycle_count}`;
+                if (jsonData.power_on_time?.hours !== undefined) {
+                   output += ` | 通电: ${jsonData.power_on_time.hours}小时`;
+                if (jsonData.power_cycle_count) {
+                   output += `, 次数: ${jsonData.power_cycle_count}`;
+                   }
+                }
+          
+                if (jsonData.smart_status?.passed !== undefined) {
+                   output += ' | SMART: ' + (jsonData.smart_status.passed ? '正常' : '警告!');
+                }
+          
+                   return output;
+                   }
+                   } catch (e) {
+                }
+
+                let devices = value.matchAll(/(\s*(Model|Device Model|Vendor).*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
+                let output = '';
+                for (const device of devices) {
+                let devicemodel = '';
+                if (device[1].indexOf("Family") !== -1) {
+                   devicemodel = device[1].replace(/.*Model Family:\s*([\s\S]*?)\n^Device Model:\s*([\s\S]*?)\n/m, '$1 - $2');
+                } else if (device[1].match(/Vendor/)) {
+                   devicemodel = device[1].replace(/.*Vendor:\s*([\s\S]*?)\n^.*Model:\s*([\s\S]*?)\n/m, '$1 $2');
+                } else {
+                   devicemodel = device[1].replace(/.*(Model|Device Model):\s*([\s\S]*?)\n/m, '$2');
+                }
+                let capacity = device[3] ? device[3].replace(/ |,/gm, '') : "未知容量";
+                let powerOnHours = device[4] || "未知";
+                if (value.indexOf("Min/Max") !== -1) {
+                   let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
+                   for (const devicetemp of devicetemps || []) {
+                     output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
+                  }
+                } else if (value.indexOf("Temperature") !== -1 || value.match(/Airflow_Temperature/)) {
+                   let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)/gm);
+                for (const devicetemp of devicetemps || []) {
+                   output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
+                }
+                } else {
+                   if (value.match(/\/dev\/sd[a-z]/) && !output) {
+                       output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 设备存在但未报告温度信息\n`;
+                   } else {
+                   output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 未检测到温度传感器\n`;
+                   }
+                  }
+                }
+                if (!output && value.length > 0) {
+                   let fallbackDevices = value.matchAll(/(\/dev\/sd[a-z]).*?Model:([\s\S]*?)\n/gm);
+                   for (const fallbackDevice of fallbackDevices || []) {
+                     output += `${fallbackDevice[2].trim()} | 提示: 设备存在但无法获取完整信息\n`;
+                   }
+                }
+                return output ? output.replace(/\n/g, '<br>') : '提示: 检测到硬盘但无法识别详细信息';
+                } else {
+                return '提示: 未安装硬盘或已直通硬盘控制器';
+                }
             }
-          }
-          
-          if (jsonData.smart_status?.passed !== undefined) {
-            output += ' | SMART: ' + (jsonData.smart_status.passed ? '正常' : '警告!');
-          }
-          
-          return output;
-        }
-      } catch (e) {
-      }
-
-      let devices = value.matchAll(/(\s*(Model|Device Model|Vendor).*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
-      let output = '';
-      for (const device of devices) {
-        let devicemodel = '';
-        if (device[1].indexOf("Family") !== -1) {
-          devicemodel = device[1].replace(/.*Model Family:\s*([\s\S]*?)\n^Device Model:\s*([\s\S]*?)\n/m, '$1 - $2');
-        } else if (device[1].match(/Vendor/)) {
-          devicemodel = device[1].replace(/.*Vendor:\s*([\s\S]*?)\n^.*Model:\s*([\s\S]*?)\n/m, '$1 $2');
-        } else {
-          devicemodel = device[1].replace(/.*(Model|Device Model):\s*([\s\S]*?)\n/m, '$2');
-        }
-        let capacity = device[3] ? device[3].replace(/ |,/gm, '') : "未知容量";
-        let powerOnHours = device[4] || "未知";
-        if (value.indexOf("Min/Max") !== -1) {
-          let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
-          for (const devicetemp of devicetemps || []) {
-            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
-          }
-        } else if (value.indexOf("Temperature") !== -1 || value.match(/Airflow_Temperature/)) {
-          let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)/gm);
-          for (const devicetemp of devicetemps || []) {
-            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
-          }
-        } else {
-          if (value.match(/\/dev\/sd[a-z]/) && !output) {
-            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 设备存在但未报告温度信息\n`;
-          } else {
-            output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 未检测到温度传感器\n`;
-          }
-        }
-      }
-      if (!output && value.length > 0) {
-        let fallbackDevices = value.matchAll(/(\/dev\/sd[a-z]).*?Model:([\s\S]*?)\n/gm);
-        for (const fallbackDevice of fallbackDevices || []) {
-          output += `${fallbackDevice[2].trim()} | 提示: 设备存在但无法获取完整信息\n`;
-        }
-      }
-      return output ? output.replace(/\n/g, '<br>') : '提示: 检测到硬盘但无法识别详细信息';
-    } else {
-      return '提示: 未安装硬盘或已直通硬盘控制器';
-    }
-  }
-  },
+        },
 EOF
 
 echo 找到关键字pveversion的行号
