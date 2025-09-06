@@ -705,7 +705,7 @@ cat > $tmpf << 'EOF'
           renderer:function(value){
 			  const w0 = value.split('\n')[0].split(' ')[0];
 			  const w1 = value.split('\n')[1].split(' ')[0];
-			  return `CPU电源模式: ${w0} | CPU功耗: ${w1} W `
+			  return `CPU电源模式: <strong>${w0}</strong> | CPU功耗: <strong>${w1} W</strong> `
             }
 	},
 
@@ -719,7 +719,7 @@ cat > $tmpf << 'EOF'
 			  const f0 = value.match(/cpu MHz.*?([\d]+)/)[1];
 			  const f1 = value.match(/CPU min MHz.*?([\d]+)/)[1];
 			  const f2 = value.match(/CPU max MHz.*?([\d]+)/)[1];
-			  return `CPU实时: ${f0} MHz | 最小: ${f1} MHz | 最大: ${f2} MHz `
+			  return `CPU实时: <strong>${f0} MHz</strong> | 最小: ${f1} MHz | 最大: ${f2} MHz `
             }
 	},
 	
@@ -732,15 +732,64 @@ cat > $tmpf << 'EOF'
           renderer: function(value) {
 			  const coreTemps = [];
 			  let coreMatch;
-			  const coreRegex = /Core (\d+).*?\+([\d\.]+)/g;
+			  const coreRegex = /(Core\s*\d+|Core\d+|Tdie|Tctl|Physical id\s*\d+).*?\+\s*([\d\.]+)/gi;
+
 			  while ((coreMatch = coreRegex.exec(value)) !== null) {
- 	                      coreTemps.push(`核心${parseInt(coreMatch[1])+1}: ${coreMatch[2]} ℃`);
-			  }
+                  let label = coreMatch[1];
+                  let tempValue = coreMatch[2];
+
+                  if (label.match(/Tdie|Tctl/i)) {
+                  	  coreTemps.push(`CPU温度: <strong>${tempValue}℃</strong>`);
+                  }
+
+                  else {
+              	      const coreNumberMatch = label.match(/\d+/);
+              	      const coreNum = coreNumberMatch ? parseInt(coreNumberMatch[0]) + 1 : 1;
+              	      coreTemps.push(`核心${coreNum}: <strong>${tempValue}℃</strong>`);
+                  }
+              }
+
+              // 核显温度
+              let igpuTemp = '';
+              const intelIgpuMatch = value.match(/(GFX|Graphics).*?\+\s*([\d\.]+)/i);
+              const amdIgpuMatch = value.match(/(junction|edge).*?\+\s*([\d\.]+)/i);
         
-			  const boardTempMatch = value.match(/temp1.*?\+([\d\.]+)/);
-			  const boardTemp = boardTempMatch ? ` || 主板: ${boardTempMatch[1]} ℃` : '';
-        
-			  return coreTemps.join(' | ') + boardTemp;
+              if (intelIgpuMatch) {
+                  igpuTemp = `核显: ${intelIgpuMatch[2]}℃`;
+              } else if (amdIgpuMatch) {
+                  igpuTemp = `核显: ${amdIgpuMatch[2]}℃`;
+              }
+
+              if (coreTemps.length === 0) {
+              	  const k10tempMatch = value.match(/k10temp-pci-\w+\n[^+]*\+\s*([\d\.]+)/);
+              	  if (k10tempMatch) {
+              	  	  coreTemps.push(`CPU温度: <strong>${k10tempMatch[1]}℃</strong>`);
+              	  }
+              }
+
+              const groupedTemps = [];
+              for (let i = 0; i < coreTemps.length; i += 4) {
+              	  groupedTemps.push(coreTemps.slice(i, i + 4).join(' | '));
+              }
+
+              const packageMatch = value.match(/(Package|SoC)\s*(id \d+)?.*?\+\s*([\d\.]+)/i);
+              const packageTemp = packageMatch ? `CPU Package: <strong>${packageMatch[3]}℃</strong>` : '';
+
+              const boardTempMatch = value.match(/(?:temp1|motherboard|sys).*?\+\s*([\d\.]+)/i);
+              const boardTemp = boardTempMatch ? `主板: <strong>${boardTempMatch[1]}℃</strong>` : '';
+
+              const combinedTemps = [
+                  igpuTemp,
+                  packageTemp,
+                  boardTemp
+              ].filter(Boolean).join(' | ');
+
+              const result = [
+                  groupedTemps.join('<br>'),
+                  combinedTemps
+              ].filter(Boolean).join('<br>');
+
+              return result || '未获取到温度信息';
           }
 	},
 
@@ -756,12 +805,20 @@ cat > $tmpf << 'EOF'
 			  
 			  for (const match of freqMatches) {
 			      const coreNum = frequencies.length + 1;
-			      frequencies.push(`核心${coreNum}: ${parseInt(match[1])} MHz`);
+			      frequencies.push(`核心${coreNum}: <strong>${parseInt(match[1])} MHz</strong>`);
 			  }
-        
-			  return frequencies.length > 0 
-			      ? frequencies.join(' | ')
-			      : '无法获取CPU频率信息';
+			  
+			  if (frequencies.length === 0) {
+			      return '无法获取CPU频率信息';
+			  }
+			  
+			  const groupedFreqs = [];
+			  for (let i = 0; i < frequencies.length; i += 4) {
+			      const group = frequencies.slice(i, i + 4);
+			      groupedFreqs.push(group.join(' | '));
+			  }
+			  
+			  return groupedFreqs.join('<br>');
            }
 	},
 	
@@ -803,9 +860,13 @@ cat > $tmpf << 'EOF'
 	        if (value.length > 0) {
 	            value = value.replace(/Â/g, '');
 	            let data = [];
+	            let nvmeNumber = -1;
+
 	            let nvmes = value.matchAll(/(^(?:Model|Total|Temperature:|Available Spare:|Percentage|Data|Power|Unsafe|Integrity Errors|nvme)[\s\S]*)+/gm);
+	            
 	            for (const nvme of nvmes) {
-	                let nvmeNumber = 0;
+	            	if (/Model Number:/.test(nvme[1])) {
+	            	nvmeNumber++; 
 	                data[nvmeNumber] = {
 	                    Models: [],
 	                    Integrity_Errors: [],
@@ -825,6 +886,7 @@ cat > $tmpf << 'EOF'
 	                    w_awaits: [],
 	                    utils: []
 	                };
+	                }
 
 	                let Models = nvme[1].matchAll(/^Model Number: *([ \S]*)$/gm);
 	                for (const Model of Models) {
@@ -896,30 +958,30 @@ cat > $tmpf << 'EOF'
 
 	                let output = '';
 	                for (const [i, nvme] of data.entries()) {
-	                    if (nvme.Models.length > 0) {
-	                        for (const nvmeModel of nvme.Models) {
-	                            output += `${nvmeModel}`;
-	                        }
-	                    }
+	                	if (i > 0) output += '<br><br>';
 
-	                    if (nvme.Integrity_Errors.length > 0) {
-	                        for (const nvmeIntegrity_Error of nvme.Integrity_Errors) {
-	                            if (nvmeIntegrity_Error != 0) {
-	                                output += ` (`;
-	                                output += `0E: ${nvmeIntegrity_Error}-故障！`;
-	                                if (nvme.Available_Spares.length > 0) {
-	                                    output += ', ';
-	                                    for (const Available_Spare of nvme.Available_Spares) {
-	                                        output += `备用空间: ${Available_Spare}`;
-	                                    }
-	                                }
-	                                output += `)`;
-	                            }
+	                    if (nvme.Models.length > 0) {
+	                        output += `<strong>${nvme.Models[0]}</strong>`;
+
+	                        if (nvme.Integrity_Errors.length > 0) {
+	                    	    for (const nvmeIntegrity_Error of nvme.Integrity_Errors) {
+	                    		    if (nvmeIntegrity_Error != 0) {
+	                    			    output += ` (`;
+	                    			    output += `0E: ${nvmeIntegrity_Error}-故障！`;
+	                    			    if (nvme.Available_Spares.length > 0) {
+	                    				    output += ', ';
+	                    				    for (const Available_Spare of nvme.Available_Spares) {
+	                    					    output += `备用空间: ${Available_Spare}`;
+	                    				    }
+	                    			    }
+	                    			    output += `)`;
+	                    		    }
+	                    	    }
 	                        }
-	                    }
+	                        output += '<br>';
+                        }
 
 	                    if (nvme.Capacitys.length > 0) {
-	                        output += ' | ';
 	                        for (const nvmeCapacity of nvme.Capacitys) {
 	                            output += `容量: ${nvmeCapacity.replace(/ |,/gm, '')}`;
 	                        }
@@ -928,7 +990,7 @@ cat > $tmpf << 'EOF'
 	                    if (nvme.Useds.length > 0) {
 	                        output += ' | ';
 	                        for (const nvmeUsed of nvme.Useds) {
-	                            output += `寿命: ${100-Number(nvmeUsed)}% `;
+	                            output += `寿命: <strong>${100-Number(nvmeUsed)}%</strong> `;
 	                            if (nvme.Reads.length > 0) {
 	                                output += '(';
 	                                for (const nvmeRead of nvme.Reads) {
@@ -951,7 +1013,7 @@ cat > $tmpf << 'EOF'
 	                    if (nvme.Temperatures.length > 0) {
 	                        output += ' | ';
 	                        for (const nvmeTemperature of nvme.Temperatures) {
-	                            output += `温度: ${nvmeTemperature}°C`;
+	                            output += `温度: <strong>${nvmeTemperature}°C</strong>`;
 	                        }
 	                    }
 
@@ -1025,6 +1087,8 @@ cat > $tmpf << 'EOF'
 	                }
 	                return output.replace(/\n/g, '<br>');
 	            }
+
+	            return output;
 	        } else {
 	            return `提示: 未安装 NVME 或已直通 NVME 控制器！`;
 	        }
@@ -1046,75 +1110,75 @@ cat > $tmpf << 'EOF'
 	        if (jsonData.standy === true) {
 	           return '休眠中';
 	           }
-	      
 	        let output = '';
 	        if (jsonData.model_name) {
-
-	        output = jsonData.model_name;
-          
-                if (jsonData.temperature?.current !== undefined) {
-                   output += ` | 温度: ${jsonData.temperature.current}°C`;
-                }
-          
-                if (jsonData.power_on_time?.hours !== undefined) {
-                   output += ` | 通电: ${jsonData.power_on_time.hours}小时`;
-                if (jsonData.power_cycle_count) {
-                   output += `, 次数: ${jsonData.power_cycle_count}`;
-                   }
-                }
-          
-                if (jsonData.smart_status?.passed !== undefined) {
-                   output += ' | SMART: ' + (jsonData.smart_status.passed ? '正常' : '警告!');
-                }
-          
-                   return output;
-                   }
-                   } catch (e) {
-                }
-
-                let devices = value.matchAll(/(\s*(Model|Device Model|Vendor).*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
-                let output = '';
-                for (const device of devices) {
-                let devicemodel = '';
-                if (device[1].indexOf("Family") !== -1) {
-                   devicemodel = device[1].replace(/.*Model Family:\s*([\s\S]*?)\n^Device Model:\s*([\s\S]*?)\n/m, '$1 - $2');
-                } else if (device[1].match(/Vendor/)) {
-                   devicemodel = device[1].replace(/.*Vendor:\s*([\s\S]*?)\n^.*Model:\s*([\s\S]*?)\n/m, '$1 $2');
-                } else {
-                   devicemodel = device[1].replace(/.*(Model|Device Model):\s*([\s\S]*?)\n/m, '$2');
-                }
-                let capacity = device[3] ? device[3].replace(/ |,/gm, '') : "未知容量";
-                let powerOnHours = device[4] || "未知";
-                if (value.indexOf("Min/Max") !== -1) {
-                   let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
-                   for (const devicetemp of devicetemps || []) {
-                     output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
-                  }
-                } else if (value.indexOf("Temperature") !== -1 || value.match(/Airflow_Temperature/)) {
-                   let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)/gm);
-                for (const devicetemp of devicetemps || []) {
-                   output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: ${devicetemp[1]}°C\n`;
-                }
-                } else {
-                   if (value.match(/\/dev\/sd[a-z]/) && !output) {
-                       output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 设备存在但未报告温度信息\n`;
-                   } else {
-                   output += `${devicemodel} | 容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 未检测到温度传感器\n`;
-                   }
-                  }
-                }
-                if (!output && value.length > 0) {
-                   let fallbackDevices = value.matchAll(/(\/dev\/sd[a-z]).*?Model:([\s\S]*?)\n/gm);
-                   for (const fallbackDevice of fallbackDevices || []) {
-                     output += `${fallbackDevice[2].trim()} | 提示: 设备存在但无法获取完整信息\n`;
-                   }
-                }
-                return output ? output.replace(/\n/g, '<br>') : '提示: 检测到硬盘但无法识别详细信息';
-                } else {
-                return '提示: 未安装硬盘或已直通硬盘控制器';
-                }
-            }
-        },
+	        output = `<strong>${jsonData.model_name}</strong><br>`;
+	                if (jsonData.temperature?.current !== undefined) {
+	                   output += `温度: <strong>${jsonData.temperature.current}°C</strong>`;
+	                }
+	                if (jsonData.power_on_time?.hours !== undefined) {
+	                   if (output.length > 0) output += ' | ';
+	                   output += `通电: ${jsonData.power_on_time.hours}小时`;
+	                if (jsonData.power_cycle_count) {
+	                   output += `, 次数: ${jsonData.power_cycle_count}`;
+	                   }
+	                }
+	                if (jsonData.smart_status?.passed !== undefined) {
+	                   if (output.length > 0) output += ' | ';
+	                   output += 'SMART: ' + (jsonData.smart_status.passed ? '正常' : '警告!');
+	                }
+	                   return output;
+	                   }
+	                   } catch (e) {
+	                }
+	                let outputs = [];
+	                let devices = value.matchAll(/(\s*(Model|Device Model|Vendor).*:\s*[\s\S]*?\n){1,2}^User.*\[([\s\S]*?)\]\n^\s*9[\s\S]*?\-\s*([\d]+)[\s\S]*?(\n(^19[0,4][\s\S]*?$){1,2}|\s{0}$)/gm);
+	                for (const device of devices) {
+	                let devicemodel = '';
+	                if (device[1].indexOf("Family") !== -1) {
+	                   devicemodel = device[1].replace(/.*Model Family:\s*([\s\S]*?)\n^Device Model:\s*([\s\S]*?)\n/m, '$1 - $2');
+	                } else if (device[1].match(/Vendor/)) {
+	                   devicemodel = device[1].replace(/.*Vendor:\s*([\s\S]*?)\n^.*Model:\s*([\s\S]*?)\n/m, '$1 $2');
+	                } else {
+	                   devicemodel = device[1].replace(/.*(Model|Device Model):\s*([\s\S]*?)\n/m, '$2');
+	                }
+	                let capacity = device[3] ? device[3].replace(/ |,/gm, '') : "未知容量";
+	                let powerOnHours = device[4] || "未知";
+	                let deviceOutput = '';
+	                if (value.indexOf("Min/Max") !== -1) {
+	                   let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)(\s\(Min\/Max\s(\d+)\/(\d+)\)$|\s{0}$)/gm);
+	                   for (const devicetemp of devicetemps || []) {
+	                     deviceOutput = `<strong>${devicemodel}</strong><br>容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: <strong>${devicetemp[1]}°C</strong>`;
+	                     outputs.push(deviceOutput);
+	                  }
+	                } else if (value.indexOf("Temperature") !== -1 || value.match(/Airflow_Temperature/)) {
+	                   let devicetemps = device[6]?.matchAll(/19[0,4][\s\S]*?\-\s*(\d+)/gm);
+	                for (const devicetemp of devicetemps || []) {
+	                   deviceOutput = `<strong>${devicemodel}</strong><br>容量: ${capacity} | 已通电: ${powerOnHours}小时 | 温度: <strong>${devicetemp[1]}°C</strong>`;
+	                   outputs.push(deviceOutput);
+	                }
+	                } else {
+	                   if (value.match(/\/dev\/sd[a-z]/)) {
+	                       deviceOutput = `<strong>${devicemodel}</strong><br>容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 设备存在但未报告温度信息`;
+	                       outputs.push(deviceOutput);
+	                   } else {
+	                       deviceOutput = `<strong>${devicemodel}</strong><br>容量: ${capacity} | 已通电: ${powerOnHours}小时 | 提示: 未检测到温度传感器`;
+	                       outputs.push(deviceOutput);
+	                   }
+	                  }
+	                }
+	                if (!outputs.length && value.length > 0) {
+	                   let fallbackDevices = value.matchAll(/(\/dev\/sd[a-z]).*?Model:([\s\S]*?)\n/gm);
+	                   for (const fallbackDevice of fallbackDevices || []) {
+	                     outputs.push(`${fallbackDevice[2].trim()}<br>提示: 设备存在但无法获取完整信息`);
+	                   }
+	                }
+	                return outputs.length ? outputs.join('<br>') : '提示: 检测到硬盘但无法识别详细信息';
+	            } else {
+	                return '提示: 未安装硬盘或已直通硬盘控制器';
+	        }
+	    }
+	},
 EOF
 
 echo 找到关键字pveversion的行号
@@ -1130,19 +1194,24 @@ rm $tmpf
 
 
 echo 修改页面高度
-# 修改并显示修改结果,位置10288行,原始值400
-# sed -i -r '/\[logView\]/,+5{/heigh/{s#[0-9]+#700#;}}' $pvemanagerlib
-# sed -n '/\[logView\]/,+5{/heigh/{p}}' $pvemanagerlib
-# 修改并显示修改结果,位置36495行,原始值300
-sed -i -r '/widget\.pveNodeStatus/,+5{/height/{s#[0-9]+#480#}}' $pvemanagerlib
-sed -n '/widget\.pveNodeStatus/,+5{/height/{p}}' $pvemanagerlib
-## 两处 height 的值需按情况修改，每多一行数据增加 20
+disk_count=$(lsblk -d -o NAME | grep -cE 'sd[a-z]|nvme[0-9]')
+# 高度变量，某些CPU核心过多，或者想显示那个PVE存储库那一行，导致高度不够，修改69为合适的数字，如80、100等。
+height_increase=$((disk_count * 69))
+
+node_status_new_height=$((400 + height_increase))
+sed -i -r '/widget\.pveNodeStatus/,+5{/height/{s#[0-9]+#'$node_status_new_height'#}}' $pvemanagerlib
+cpu_status_new_height=$((300 + height_increase))
+sed -i -r '/widget\.pveCpuStatus/,+5{/height/{s#[0-9]+#'$cpu_status_new_height'#}}' $pvemanagerlib
+
+echo "修改后的高度值："
+sed -n -e '/widget\.pveNodeStatus/,+5{/height/{p}}' \
+       -e '/widget\.pveCpuStatus/,+5{/height/{p}}' $pvemanagerlib
 
 # 调整显示布局
 ln=$(expr $(sed -n -e '/widget.pveDcGuests/=' $pvemanagerlib) + 10)
-sed -i "${ln}a\		textAlign: 'right'," $pvemanagerlib
+sed -i "${ln}a\ textAlign: 'right'," $pvemanagerlib
 ln=$(expr $(sed -n -e '/widget.pveNodeStatus/=' $pvemanagerlib) + 10)
-sed -i "${ln}a\		textAlign: 'right'," $pvemanagerlib
+sed -i "${ln}a\ textAlign: 'right'," $pvemanagerlib
 
 ###################  修改proxmoxlib.js   ##########################
 
